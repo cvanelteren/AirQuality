@@ -34,6 +34,9 @@ CC BY-SA 4.0 Attribution-ShareAlike 4.0 International License
 #include <ESP8266HTTPClient.h>
 #include <WiFiClient.h>
 
+
+#include <ESP8266WebServer.h>
+
 #include <EEPROM.h>
 
 //#include "SGP30.h"
@@ -60,9 +63,24 @@ U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, /* reset=*/ U8X8_PIN_NONE);
 
 // Replace above if you have display on top left
 //U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R2, /* reset=*/ U8X8_PIN_NONE);
-
-
+const int port = 8080;
+ESP8266WebServer server(port);
 // CONFIGURATION START
+
+/* const char* deviceID = "AirQ1"; */
+/* const char* ssid = "TMNL-AC9B01"; */
+/* const char* password = "Q5HQWQCDN6E8Y7NMC"; */
+/* const int port = 8080; */
+
+/* // Uncomment the line below to configure a static IP address. */
+/* #define staticip */
+/* #ifdef staticip */
+/* IPAddress static_ip(192, 168, 1, 134); */
+/* IPAddress gateway(192, 168, 0, 1); */
+/* IPAddress subnet(255, 255, 255, 0); */
+/* #endif */
+/* ESP8266WebServer server(port); */
+
 
 //set to the endpoint you would like to use
 String APIROOT = "http://hw.airgradient.com/";
@@ -114,11 +132,34 @@ int currentState;
 unsigned long pressedTime  = 0;
 unsigned long releasedTime = 0;
 
+
+
+String createPayload(){
+  return "{\"wifi\":" + String(WiFi.RSSI())
+      + (Co2 < 0 ? "" : ", \"rco2\":" + String(Co2))
+      + (pm25 < 0 ? "" : ", \"pm02\":" + String(pm25))
+      + (TVOC < 0 ? "" : ", \"tvoc_index\":" + String(TVOC))
+      + (NOX < 0 ? "" : ", \"nox_index\":" + String(NOX))
+      + ", \"atmp\":" + String(temp)
+      + (hum < 0 ? "" : ", \"rhum\":" + String(hum))
+      + "}";
+}
+
+void sendPayload(){
+  String payload = createPayload();
+  server.send(200, "application/json", payload);
+};
+
+void handleNotFound(){
+  server.send(404, "text/plain", "Not Found");
+};
+
+
 void setup() {
   Serial.begin(115200);
   Serial.println("Hello");
   u8g2.begin();
-  //u8g2.setDisplayRotation(U8G2_R0);
+  u8g2.setDisplayRotation(U8G2_R0);
 
   EEPROM.begin(512);
   delay(500);
@@ -148,7 +189,15 @@ void setup() {
   ag.CO2_Init();
   ag.PMS_Init();
   ag.TMP_RH_Init(0x44);
+
+  // setup server
+  server.on("/metrics", sendPayload);
+  server.onNotFound(handleNotFound);
+  server.begin();
+
 }
+
+
 
 void loop() {
   currentMillis = millis();
@@ -157,7 +206,8 @@ void loop() {
   updateCo2();
   updatePm25();
   updateTempHum();
-  sendToServer();
+  /* sendToServer(); */
+  server.handleClient(); // deal with requests
 }
 
 void inConf(){
@@ -357,6 +407,9 @@ void updateOLED2(String ln1, String ln2, String ln3) {
     } while ( u8g2.nextPage() );
 }
 
+
+
+
 void sendToServer() {
    if (currentMillis - previoussendToServer >= sendToServerInterval) {
      previoussendToServer += sendToServerInterval;
@@ -370,7 +423,8 @@ void sendToServer() {
       + "}";
 
       if(WiFi.status()== WL_CONNECTED){
-        Serial.println(payload);
+        Serial.println("Payload:" + String(payload));
+        /* String POSTURL = APIROOT + "/metrics"; */
         String POSTURL = APIROOT + "sensors/airgradient:" + String(ESP.getChipId(), HEX) + "/measures";
         Serial.println(POSTURL);
         WiFiClient client;
@@ -379,6 +433,7 @@ void sendToServer() {
         http.addHeader("content-type", "application/json");
         int httpCode = http.POST(payload);
         String response = http.getString();
+        Serial.println("HTML response:");
         Serial.println(httpCode);
         Serial.println(response);
         http.end();
@@ -401,6 +456,9 @@ void sendToServer() {
      updateOLED2("booting into", "offline mode", "");
      Serial.println("failed to connect and hit timeout");
      delay(6000);
+   }
+   else{
+     updateOLED2("Connected", "to", "WiFi");
    }
 
 }
